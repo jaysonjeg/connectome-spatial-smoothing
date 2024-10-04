@@ -245,35 +245,54 @@ def _local_geodesic_distances_on_surface(surface, max_distance):
 
 def _trim_and_stack_local_distances(left_local_distances,
                                     right_local_distances,
-                                    cifti_file):
-    # load a sample file to read the mapping from
-    cifti = nib.load(cifti_file)
+                                    cifti_file,mesh_version=None):
 
-    # load the brain models from the file (first two models are the left and right cortex)
-    brain_models = [x for x in cifti.header.get_index_map(1).brain_models]
+    nverts = left_local_distances.shape[0]
+    if nverts==32492 or mesh_version=='fsaverage_LR32k': 
+        # load a sample file to read the mapping from
+        cifti = nib.load(cifti_file)
+        # load the brain models from the file (first two models are the left and right cortex)
+        brain_models = [x for x in cifti.header.get_index_map(1).brain_models]
+        # trim left surface to cortex
+        left_cortex_model = brain_models[0]
+        left_cortex_indices = left_cortex_model.vertex_indices[:]
+        # trim right surface to cortex
+        right_cortex_model = brain_models[1]
+        right_cortex_indices = right_cortex_model.vertex_indices[:]
+    elif mesh_version[0:5]=='onavg':
+            left_cortex_indices = np.arange(nverts)
+            right_cortex_indices = np.arange(nverts)
+    else:
+        #fsaverage5 mesh
+        assert(nverts==10242)
+        import biasfmri_utils as butils
+        mask = butils.get_fsaverage5_mask()
+        mask_left = mask[0:nverts]
+        mask_right = mask[nverts:]
+        left_cortex_indices = np.where(mask_left==1)[0]
+        right_cortex_indices = np.where(mask_right==1)[0]
 
-    # trim left surface to cortex
-    left_cortex_model = brain_models[0]
-    left_cortex_indices = left_cortex_model.vertex_indices[:]
     left_cortex_local_distance = left_local_distances[left_cortex_indices, :][:, left_cortex_indices]
-
-    # trim right surface to cortex
-    right_cortex_model = brain_models[1]
-    right_cortex_indices = right_cortex_model.vertex_indices[:]
     right_cortex_local_distance = right_local_distances[right_cortex_indices, :][:, right_cortex_indices]
 
     # concatenate local distances with diagonal stacking
     return _diagonal_stack_sparse_matrices(left_cortex_local_distance, right_cortex_local_distance)
 
 
-def _get_cortical_local_distances(left_surface_file, right_surface_file, max_distance, cifti_file):
+def _get_cortical_local_distances(left_surface_file, right_surface_file, max_distance, cifti_file=None,mesh_version=None):
     """
     This function computes the local distances on the cortical surface and returns a sparse matrix
     with dimensions equal to cortical brainordinates in the cifti file.
+    Parameters:
+    -----------
+    mesh_version: str
+        None, fsaverage_LR32k, onavg-ico32, or onavg-ico64
     """
+    if cifti_file is None:
+        cifti_file = _sample_cifti_dscalar
     left_local_distances = _local_geodesic_distances_on_surface(nib.load(left_surface_file), max_distance)
     right_local_distances = _local_geodesic_distances_on_surface(nib.load(right_surface_file), max_distance)
-    return _trim_and_stack_local_distances(left_local_distances, right_local_distances, cifti_file)
+    return _trim_and_stack_local_distances(left_local_distances, right_local_distances, cifti_file,mesh_version)
 
 
 def _get_spatial_local_distances(xyz, max_distance):
